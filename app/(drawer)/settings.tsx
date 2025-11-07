@@ -1,13 +1,12 @@
-// app/(drawer)/settings.tsx
 import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  Switch,
   TouchableOpacity,
   Alert,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,24 +15,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../../contexts/ThemeContext';
 
 interface EditorSettings {
-  wordWrap: boolean;
-  showLineNumbers: boolean;
-  groupTags: boolean;
-  autoSave: boolean;
-  spellCheck: boolean;
   fontSize: number;
-  theme: 'light' | 'dark' | 'auto';
+  theme: 'light' | 'dark' | 'auto' | 'ocean' | 'forest' | 'solarized';
 }
 
 export default function SettingsScreen() {
   const router = useRouter();
   const { colors, setTheme } = useTheme();
   const [settings, setSettings] = useState<EditorSettings>({
-    wordWrap: true,
-    showLineNumbers: false,
-    groupTags: true,
-    autoSave: true,
-    spellCheck: true,
     fontSize: 14,
     theme: 'auto',
   });
@@ -57,22 +46,13 @@ export default function SettingsScreen() {
     try {
       await AsyncStorage.setItem('editor_settings', JSON.stringify(newSettings));
       setSettings(newSettings);
-      
-      // Apply theme changes immediately
+
       if (newSettings.theme !== settings.theme) {
         setTheme(newSettings.theme);
       }
     } catch (error) {
       console.log('Error saving settings:', error);
     }
-  };
-
-  const toggleSetting = (key: keyof EditorSettings) => {
-    const newSettings = {
-      ...settings,
-      [key]: !settings[key],
-    };
-    saveSettings(newSettings);
   };
 
   const changeFontSize = (increment: boolean) => {
@@ -86,7 +66,7 @@ export default function SettingsScreen() {
     }
   };
 
-  const changeTheme = (theme: 'light' | 'dark' | 'auto') => {
+  const changeTheme = (theme: EditorSettings['theme']) => {
     const newSettings = {
       ...settings,
       theme,
@@ -97,7 +77,7 @@ export default function SettingsScreen() {
   const resetSettings = () => {
     Alert.alert(
       'Reset Settings',
-      'Are you sure you want to reset all settings to default?',
+      'Reset all settings to default?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -105,11 +85,6 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: () => {
             const defaultSettings: EditorSettings = {
-              wordWrap: true,
-              showLineNumbers: false,
-              groupTags: true,
-              autoSave: true,
-              spellCheck: true,
               fontSize: 14,
               theme: 'auto',
             };
@@ -120,100 +95,65 @@ export default function SettingsScreen() {
     );
   };
 
-  const SettingItem = ({ 
-    title, 
-    description, 
-    value, 
-    onToggle,
-    type = 'switch'
-  }: {
-    title: string;
-    description: string;
-    value: boolean;
-    onToggle: () => void;
-    type?: 'switch' | 'select';
-  }) => (
-    <View style={[styles.settingItem, { borderBottomColor: colors.border }]}>
-      <View style={styles.settingInfo}>
-        <Text style={[styles.settingTitle, { color: colors.text }]}>{title}</Text>
-        <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
-          {description}
-        </Text>
-      </View>
-      {type === 'switch' && (
-        <Switch
-          value={value}
-          onValueChange={onToggle}
-          trackColor={{ false: colors.border, true: colors.primary }}
-          thumbColor={colors.background}
-        />
-      )}
-    </View>
-  );
-
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <ScrollView style={styles.container}>
-        <View style={styles.header}>
+        {/* Header */}
+        <View style={[styles.header, { borderBottomColor: colors.border }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={colors.primary} />
           </TouchableOpacity>
-          <Text style={[styles.title, { color: colors.text }]}>Editor Settings</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
         </View>
 
-        {/* Editor Behavior */}
+        {/* About App Section */}
         <View style={[styles.section, { backgroundColor: colors.surface }]}>
-          <Text style={[styles.sectionTitle, { color: colors.text }]}>Editor Behavior</Text>
-          
-          <SettingItem
-            title="Word Wrap"
-            description="Wrap long lines to fit the editor width"
-            value={settings.wordWrap}
-            onToggle={() => toggleSetting('wordWrap')}
-          />
-          
-          <SettingItem
-            title="Show Line Numbers"
-            description="Display line numbers in code views"
-            value={settings.showLineNumbers}
-            onToggle={() => toggleSetting('showLineNumbers')}
-          />
-          
-          <SettingItem
-            title="Group HTML Tags"
-            description="Visually group related HTML tags"
-            value={settings.groupTags}
-            onToggle={() => toggleSetting('groupTags')}
-          />
-          
-          <SettingItem
-            title="Auto Save"
-            description="Automatically save changes periodically"
-            value={settings.autoSave}
-            onToggle={() => toggleSetting('autoSave')}
-          />
-          
-          <SettingItem
-            title="Spell Check"
-            description="Highlight spelling errors in the editor"
-            value={settings.spellCheck}
-            onToggle={() => toggleSetting('spellCheck')}
-          />
+          <Text style={[styles.sectionTitle, { color: colors.text }]}>About App</Text>
+
+          <View style={[styles.settingItem, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>App Name</Text>
+            <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
+              CuriousEditor
+            </Text>
+          </View>
+
+          <View style={[styles.settingItem, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>Version</Text>
+            <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
+              1.0.0
+            </Text>
+          </View>
+
+          <View style={[styles.settingItem, { borderBottomColor: colors.border }]}>
+            <Text style={[styles.settingTitle, { color: colors.text }]}>Developer</Text>
+            <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
+              CuriousSheva
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.linkItem, { borderTopColor: colors.border }]}
+            onPress={() => Linking.openURL('https://github.com/CuriousSheva')}
+          >
+            <Ionicons name="logo-github" size={20} color={colors.primary} />
+            <Text style={[styles.linkText, { color: colors.primary }]}>GitHub</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Appearance */}
         <View style={[styles.section, { backgroundColor: colors.surface }]}>
           <Text style={[styles.sectionTitle, { color: colors.text }]}>Appearance</Text>
-          
+
+          {/* Font size control */}
           <View style={[styles.settingItem, { borderBottomColor: colors.border }]}>
             <View style={styles.settingInfo}>
               <Text style={[styles.settingTitle, { color: colors.text }]}>Font Size</Text>
               <Text style={[styles.settingDescription, { color: colors.textSecondary }]}>
-                Adjust the text size in the editor
+                Adjust text size in the editor
               </Text>
             </View>
             <View style={styles.fontSizeControls}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.fontSizeButton, { backgroundColor: colors.primary }]}
                 onPress={() => changeFontSize(false)}
                 disabled={settings.fontSize <= 10}
@@ -223,7 +163,7 @@ export default function SettingsScreen() {
               <Text style={[styles.fontSizeValue, { color: colors.text }]}>
                 {settings.fontSize}px
               </Text>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.fontSizeButton, { backgroundColor: colors.primary }]}
                 onPress={() => changeFontSize(true)}
                 disabled={settings.fontSize >= 24}
@@ -233,6 +173,7 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          {/* Theme selector */}
           <View style={[styles.settingItem, { borderBottomColor: colors.border }]}>
             <View style={styles.settingInfo}>
               <Text style={[styles.settingTitle, { color: colors.text }]}>Theme</Text>
@@ -240,32 +181,40 @@ export default function SettingsScreen() {
                 Choose your preferred color theme
               </Text>
             </View>
+
             <View style={styles.themeButtons}>
-              {(['light', 'dark', 'auto'] as const).map((theme) => (
-                <TouchableOpacity
-                  key={theme}
-                  style={[
-                    styles.themeButton,
-                    { backgroundColor: colors.background },
-                    settings.theme === theme && { backgroundColor: colors.primary }
-                  ]}
-                  onPress={() => changeTheme(theme)}
-                >
-                  <Text style={[
-                    styles.themeButtonText,
-                    settings.theme === theme && styles.activeThemeButtonText
-                  ]}>
-                    {theme.charAt(0).toUpperCase() + theme.slice(1)}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+              {(['light', 'dark', 'auto', 'ocean', 'forest', 'solarized'] as const).map(
+                (theme) => (
+                  <TouchableOpacity
+                    key={theme}
+                    style={[
+                      styles.themeButton,
+                      {
+                        backgroundColor:
+                          settings.theme === theme ? colors.primary : colors.background,
+                        borderColor: colors.border,
+                      },
+                    ]}
+                    onPress={() => changeTheme(theme)}
+                  >
+                    <Text
+                      style={[
+                        styles.themeButtonText,
+                        { color: settings.theme === theme ? '#fff' : colors.text },
+                      ]}
+                    >
+                      {theme.charAt(0).toUpperCase() + theme.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                )
+              )}
             </View>
           </View>
         </View>
 
         {/* Reset Section */}
         <View style={[styles.section, { backgroundColor: colors.surface }]}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.resetButton, { backgroundColor: colors.error }]}
             onPress={resetSettings}
           >
@@ -279,39 +228,25 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-  },
-  container: {
-    flex: 1,
-  },
+  safeArea: { flex: 1 },
+  container: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
-  backButton: {
-    padding: 8,
-    marginRight: 16,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  section: {
-    margin: 16,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
+  backButton: { padding: 8, marginRight: 16 },
+  title: { fontSize: 20, fontWeight: 'bold' },
+
+  section: { margin: 16, borderRadius: 12, overflow: 'hidden' },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
   },
+
   settingItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -319,54 +254,35 @@ const styles = StyleSheet.create({
     padding: 16,
     borderBottomWidth: 1,
   },
-  settingInfo: {
-    flex: 1,
-    marginRight: 16,
-  },
-  settingTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  settingDescription: {
-    fontSize: 14,
-    opacity: 0.7,
-  },
-  fontSizeControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  fontSizeButton: {
-    padding: 8,
-    borderRadius: 6,
-    marginHorizontal: 4,
-  },
-  fontSizeButtonText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  fontSizeValue: {
-    marginHorizontal: 12,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  themeButtons: {
-    flexDirection: 'row',
-  },
+  settingInfo: { flex: 1, marginRight: 16 },
+  settingTitle: { fontSize: 16, fontWeight: '600', marginBottom: 4 },
+  settingDescription: { fontSize: 14, opacity: 0.7 },
+
+  fontSizeControls: { flexDirection: 'row', alignItems: 'center' },
+  fontSizeButton: { padding: 8, borderRadius: 6, marginHorizontal: 4 },
+  fontSizeButtonText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+  fontSizeValue: { marginHorizontal: 12, fontSize: 16, fontWeight: '600' },
+
+  themeButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   themeButton: {
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 6,
+    borderWidth: 1,
     marginLeft: 8,
+    marginTop: 8,
   },
-  themeButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
+  themeButtonText: { fontSize: 12, fontWeight: '600' },
+
+  linkItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 16,
+    borderTopWidth: 1,
   },
-  activeThemeButtonText: {
-    color: 'white',
-  },
+  linkText: { fontSize: 14, fontWeight: '600' },
+
   resetButton: {
     flexDirection: 'row',
     alignItems: 'center',

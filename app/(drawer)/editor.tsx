@@ -8,20 +8,20 @@ import {
   TextInput,
   Alert,
   ScrollView,
-  StatusBar,
   Platform
 } from 'react-native';
 import { useRouter, useNavigation, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as DocumentPicker from 'expo-document-picker';
-import * as ImagePicker from 'expo-image-picker';
 import RichTextEditor, { EditorRef } from '../../components/RichTextEditor';
 import EnhancedToolbar from '../../components/EnhancedToolbar';
-import Terminal from '../../components/Terminal';
-import AXSTerminal from '../../components/AXSTerminal';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { DrawerActions } from '@react-navigation/native';
 import { useTheme } from '../../contexts/ThemeContext';
+//import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system';
+
 
 interface Document {
   id: string;
@@ -32,11 +32,6 @@ interface Document {
   category?: string;
 }
 
-// Add status bar height helper
-const getStatusBarHeight = () => {
-  return Platform.OS === 'ios' ? 44 : (StatusBar.currentHeight || 24);
-};
-
 export default function EditorScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -46,80 +41,43 @@ export default function EditorScreen() {
   const [document, setDocument] = useState<Document | null>(null);
   const [content, setContent] = useState('');
   const [title, setTitle] = useState('Untitled Document');
-  const [showFileTypeModal, setShowFileTypeModal] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<{ uri: string; name: string; type: string } | null>(null);
+  const [showLinkModal, setShowLinkModal] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [currentAction, setCurrentAction] = useState<'link' | 'image' | null>(null);
+  const [linkUrl, setLinkUrl] = useState('');
+  const [linkText, setLinkText] = useState('');
+  const [imageUrl, setImageUrl] = useState('');
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [wordCount, setWordCount] = useState(0);
   const [charCount, setCharCount] = useState(0);
-  const [showTerminal, setShowTerminal] = useState(false);
-  const [showAXSTerminal, setShowAXSTerminal] = useState(false);
-  
-  // Editor settings state
-  const [editorSettings, setEditorSettings] = useState({
-    wordWrap: true,
-    showLineNumbers: false,
-    groupTags: true,
-  });
-
-  // Load settings when component mounts
-  useEffect(() => {
-    loadEditorSettings();
-  }, []);
-
-  const loadEditorSettings = async () => {
-    try {
-      const savedSettings = await AsyncStorage.getItem('editor_settings');
-      if (savedSettings) {
-        const settings = JSON.parse(savedSettings);
-        setEditorSettings({
-          wordWrap: settings.wordWrap,
-          showLineNumbers: settings.showLineNumbers,
-          groupTags: settings.groupTags,
-        });
-      }
-    } catch (error) {
-      console.log('Error loading editor settings:', error);
-    }
-  };
-
-  // Terminal handlers
-  const handleOpenTerminal = () => {
-    setShowTerminal(true);
-  };
-
-  const handleOpenAXS = () => {
-    setShowAXSTerminal(true);
-  };
-
-  // Inside your component:
-  const { colors } = useTheme();
+  const [activeTab, setActiveTab] = useState<'url' | 'gallery' | 'camera'>('url');
 
   // Load document if editing existing one
   useEffect(() => {
     if (params.documentId) {
       loadDocument(params.documentId as string);
     } else {
-      // Load most recent document or start fresh
       loadRecentDocument();
     }
+    
+    // Request permissions
+    (async () => {
+      if (Platform.OS !== 'web') {
+        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Sorry, we need camera roll permissions to make this work!');
+        }
+      }
+    })();
   }, [params.documentId]);
-
-  // Add this useEffect to handle file content from params
-  useEffect(() => {
-    if (params.content && params.title) {
-      setTitle(params.title as string);
-      editorRef.current?.setContent(params.content as string);
-    }
-  }, [params.content, params.title]);
 
   const loadRecentDocument = async () => {
     try {
       const keys = await AsyncStorage.getAllKeys();
       const documentKeys = keys.filter(key => key.startsWith('document_'));
       if (documentKeys.length > 0) {
-        // Get the most recent document
         const documentsData = await AsyncStorage.multiGet(documentKeys);
         const docs = documentsData.map(([key, value]) => JSON.parse(value || '{}'));
         docs.sort((a, b) => new Date(b.lastModified).getTime() - new Date(a.lastModified).getTime());
@@ -152,7 +110,6 @@ export default function EditorScreen() {
     setContent(html);
     setHasUnsavedChanges(true);
     
-    // Update counts
     const words = text.trim() ? text.trim().split(/\s+/).length : 0;
     const chars = text.length;
     setWordCount(words);
@@ -181,126 +138,140 @@ export default function EditorScreen() {
     }
   };
 
-  // Updated file insertion handlers
   const handleInsertLink = () => {
-    setCurrentAction('link');
-    setShowFileTypeModal(true);
+    setShowLinkModal(true);
+    setActiveTab('url');
   };
 
   const handleInsertImage = () => {
-    setCurrentAction('image');
-    setShowFileTypeModal(true);
+    setShowImageModal(true);
+    setActiveTab('url');
   };
 
-  const handleFileTypeSelection = async (option: 'gallery' | 'camera' | 'files' | 'url') => {
-    setShowFileTypeModal(false);
-    
-    switch (option) {
-      case 'gallery':
-        await pickFromGallery();
-        break;
-      case 'camera':
-        await takePhoto();
-        break;
-      case 'files':
-        await pickDocument();
-        break;
-      case 'url':
-        // Fallback to URL input (you can keep your existing modal logic here if needed)
-        Alert.alert('Info', 'URL input feature coming soon!');
-        break;
+ 
+const confirmLink = () => {
+  if (activeTab === 'url') {
+    // Handle URL links
+    if (linkUrl.trim()) {
+      const url = linkUrl.trim();
+      const text = linkText.trim() || url;
+      
+      if (editorRef.current) {
+        editorRef.current.createLink(url, text);
+      }
+      
+      setShowLinkModal(false);
+      resetLinkModal();
+    } else {
+      alert('Please enter a URL');
+    }
+  } else {
+    // Handle file links
+    if (selectedFile) {
+      // For files, you have several options:
+      
+      // Option 1: Use file URI directly (for local files in app)
+      const fileUri = selectedFile.uri;
+      const fileName = selectedFile.name;
+      const displayText = linkText.trim() || fileName;
+      
+      if (editorRef.current) {
+        // Create a link that points to the local file
+        // Note: This only works for files within the app's sandbox
+        editorRef.current.createLink(fileUri, displayText);
+      }
+      
+      setShowLinkModal(false);
+      resetLinkModal();
+    } else {
+      alert('Please select a file first');
+    }
+  }
+};
+const resetLinkModal = () => {
+  setLinkUrl('');
+  setLinkText('');
+  setSelectedFile(null);
+  setActiveTab('url');
+};
+
+  const confirmImage = () => {
+    if (imageUrl) {
+      editorRef.current?.insertImage(imageUrl);
+      setShowImageModal(false);
+      setImageUrl('');
+    } else {
+      Alert.alert('Error', 'Please enter an image URL');
     }
   };
 
-  const pickFromGallery = async () => {
+  // NEW: Pick image from gallery
+  const pickImageFromGallery = async () => {
     try {
-      // Request permissions
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Sorry, we need camera roll permissions to select images.');
-        return;
-      }
-
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
-        base64: false,
       });
 
-      if (!result.canceled && currentAction === 'image') {
+      if (!result.canceled && result.assets[0].uri) {
         editorRef.current?.insertImage(result.assets[0].uri);
-        Alert.alert('Success', 'Image inserted successfully!');
+        setShowImageModal(false);
       }
     } catch (error) {
-      console.error('Error picking image from gallery:', error);
       Alert.alert('Error', 'Failed to pick image from gallery');
     }
   };
 
+  // NEW: Take photo with camera
   const takePhoto = async () => {
     try {
-      // Request camera permissions
-      const { status } = await ImagePicker.requestCameraPermissionsAsync();
-      
-      if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Sorry, we need camera permissions to take photos.');
-        return;
-      }
-
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
-        base64: false,
       });
 
-      if (!result.canceled && currentAction === 'image') {
+      if (!result.canceled && result.assets[0].uri) {
         editorRef.current?.insertImage(result.assets[0].uri);
-        Alert.alert('Success', 'Photo inserted successfully!');
+        setShowImageModal(false);
       }
     } catch (error) {
-      console.error('Error taking photo:', error);
       Alert.alert('Error', 'Failed to take photo');
     }
   };
 
-  const pickDocument = async () => {
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: '*/*', // All file types
-        copyToCacheDirectory: true,
-      });
+  // NEW: Pick file from filesystem
+   const pickFile = async () => {
+  try {
+    const result = await DocumentPicker.getDocumentAsync({
+      type: '*/*', // All file types
+      copyToCacheDirectory: true,
+    });
 
-      if (!result.canceled) {
-        const file = result.assets[0];
-        
-        if (currentAction === 'link') {
-          // For links, create a link to the file
-          editorRef.current?.createLink(file.uri, file.name || 'File');
-          Alert.alert('Success', `Link to "${file.name}" inserted successfully!`);
-        } else if (currentAction === 'image') {
-          // For images, insert the image directly if it's an image file
-          if (file.mimeType?.startsWith('image/')) {
-            editorRef.current?.insertImage(file.uri);
-            Alert.alert('Success', 'Image inserted successfully!');
-          } else {
-            Alert.alert('Error', 'Please select an image file');
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error picking document:', error);
-      Alert.alert('Error', 'Failed to pick document');
+    if (result.assets && result.assets.length > 0) {
+      const file = result.assets[0];
+      setSelectedFile({
+        uri: file.uri,
+        name: file.name || 'file',
+        type: file.mimeType || 'application/octet-stream'
+      });
+      
+      // Auto-fill link text with file name
+      setLinkText(file.name || 'Download File');
+      
+      // For local files, we need to handle them differently
+      // You might want to upload to a server first or use a data URL
+      console.log('Selected file:', file);
     }
-  };
+  } catch (error) {
+    console.log('Error picking file:', error);
+    alert('Error selecting file');
+  }
+};
 
   const handleExport = async () => {
-    const htmlContent = await editorRef.current?.getContent();
-    const textContent = await editorRef.current?.getText();
-    
     setShowExportModal(true);
   };
 
@@ -359,147 +330,368 @@ export default function EditorScreen() {
   };
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <StatusBar 
-        backgroundColor={colors.background} 
-        barStyle={colors.isDark ? 'light-content' : 'dark-content'} 
-        translucent={true}
-      />
-      
-      {/* Ultra Compact Header */}
-      <View style={[styles.header, { 
-        backgroundColor: colors.surface, 
-        borderBottomColor: colors.border,
-        marginTop: Platform.OS === 'ios' ? getStatusBarHeight() : 0,
-      }]}>
-        <TouchableOpacity onPress={openDrawer} style={styles.menuButton}>
-          <Ionicons name="menu" size={20} color={colors.primary} />
-        </TouchableOpacity>
-        
-        <TouchableOpacity onPress={() => setShowSaveModal(true)} style={styles.titleSection}>
-          <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-            {title}
-          </Text>
-          <Ionicons name="pencil" size={12} color={colors.textSecondary} />
-        </TouchableOpacity>
-        
-        <View style={styles.headerActions}>
-          <View style={styles.stats}>
-            <Text style={[styles.statText, { color: colors.textSecondary }]}>
-              {wordCount}w
-            </Text>
-            <Text style={[styles.statText, { color: colors.textSecondary }]}>
-              {charCount}c
-            </Text>
+//    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        {/* Enhanced Header */}
+        <View style={styles.header}>
+          <TouchableOpacity onPress={openDrawer} style={styles.menuButton}>
+            <Ionicons name="menu" size={24} color="#007AFF" />
+          </TouchableOpacity>
+          
+          <TouchableOpacity onPress={() => setShowSaveModal(true)} style={styles.titleSection}>
+            <Text style={styles.title} numberOfLines={1}>{title}</Text>
+            <Ionicons name="pencil" size={14} color="#666" />
+          </TouchableOpacity>
+          
+          <View style={styles.headerActions}>
+            <View style={styles.stats}>
+              <Text style={styles.statText}>{wordCount} words</Text>
+              <Text style={styles.statText}>{charCount} chars</Text>
+            </View>
+            <TouchableOpacity onPress={handleExport} style={styles.actionButton}>
+              <Ionicons name="download" size={20} color="#007AFF" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setShowSaveModal(true)} style={styles.saveButton}>
+              <Text style={styles.saveButtonText}>
+                {hasUnsavedChanges ? 'Save' : 'Saved'}
+              </Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity onPress={handleExport} style={styles.actionButton}>
-            <Ionicons name="download" size={16} color={colors.primary} />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            onPress={() => setShowSaveModal(true)} 
-            style={[styles.saveButton, { backgroundColor: colors.primary }]}
-          >
-            <Text style={styles.saveButtonText}>
-              {hasUnsavedChanges ? 'Save' : 'Saved'}
+        </View>
+
+        {/* Enhanced Toolbar */}
+        <EnhancedToolbar 
+          editorRef={editorRef}
+          onInsertLink={handleInsertLink}
+          onInsertImage={handleInsertImage}
+          onNewDocument={handleNewDocument}
+        />
+        
+        {/* Editor */}
+        <View style={styles.editorContainer}>
+          <RichTextEditor
+            ref={editorRef}
+            style={styles.editor}
+            onChange={handleContentChange}
+            placeholder="Start writing your document..."
+          />
+        </View>
+
+        {/* Enhanced Link Insertion Modal */}
+<Modal visible={showLinkModal} animationType="slide" transparent>
+  <View style={styles.modalOverlay}>
+    <View style={styles.modalContent}>
+      <Text style={styles.modalTitle}>Insert Link</Text>
+      
+      {/* Tab Navigation */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'url' && styles.activeTab]}
+          onPress={() => setActiveTab('url')}
+        >
+          <Text style={[styles.tabText, activeTab === 'url' && styles.activeTabText]}>
+            URL
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'gallery' && styles.activeTab]}
+          onPress={() => setActiveTab('gallery')}
+        >
+          <Text style={[styles.tabText, activeTab === 'gallery' && styles.activeTabText]}>
+            File
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {activeTab === 'url' ? (
+        <>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter URL (https://...)"
+            value={linkUrl}
+            onChangeText={setLinkUrl}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+          />
+          
+          <TextInput
+            style={styles.input}
+            placeholder="Link text (optional)"
+            value={linkText}
+            onChangeText={setLinkText}
+          />
+        </>
+      ) : (
+        <View style={styles.fileSection}>
+          <TouchableOpacity style={styles.filePickButton} onPress={pickFile}>
+            <Ionicons name="document" size={24} color="#007AFF" />
+            <Text style={styles.filePickText}>
+              {selectedFile ? 'Change File' : 'Pick a file from your device'}
             </Text>
           </TouchableOpacity>
+          
+          {selectedFile && (
+            <View style={styles.selectedFile}>
+              <Ionicons name="document-attach" size={16} color="#666" />
+              <Text style={styles.selectedFileName} numberOfLines={1}>
+                {selectedFile.name}
+              </Text>
+              <Text style={styles.selectedFileSize}>
+                {/* You can add file size here if needed */}
+              </Text>
+            </View>
+          )}
         </View>
-      </View>
-
-      {/* Enhanced Toolbar */}
-      <EnhancedToolbar 
-        editorRef={editorRef}
-        onInsertLink={handleInsertLink}
-        onInsertImage={handleInsertImage}
-        onNewDocument={handleNewDocument}
-        onOpenTerminal={handleOpenTerminal}
-        onOpenAXS={handleOpenAXS}
-      />
+      )}
       
-      {/* Editor */}
-      <View style={styles.editorContainer}>
-        <RichTextEditor
-          ref={editorRef}
-          style={styles.editor}
-          onChange={handleContentChange}
-          placeholder="Start writing your document..."
-          settings={editorSettings}
-        />
+      <View style={styles.modalButtons}>
+        <TouchableOpacity 
+          style={[styles.modalButton, styles.cancelButton]}
+          onPress={() => {
+            setShowLinkModal(false);
+            resetLinkModal();
+          }}
+        >
+          <Text style={styles.cancelButtonText}>Cancel</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity 
+          style={[
+            styles.modalButton, 
+            styles.confirmButton,
+            ((activeTab === 'url' && !linkUrl.trim()) || 
+             (activeTab === 'gallery' && !selectedFile)) && styles.disabledButton
+          ]}
+          onPress={confirmLink}
+          disabled={(activeTab === 'url' && !linkUrl.trim()) || 
+                   (activeTab === 'gallery' && !selectedFile)}
+        >
+          <Text style={styles.confirmButtonText}>Insert</Text>
+        </TouchableOpacity>
       </View>
-
-      {/* Terminal Components */}
-      <Terminal 
-        visible={showTerminal}
-        onClose={() => setShowTerminal(false)}
-      />
-      
-      <AXSTerminal 
-        visible={showAXSTerminal}
-        onClose={() => setShowAXSTerminal(false)}
-        editorRef={editorRef}
-        currentDocument={document}
-        onDocumentUpdate={(content) => {
-          setContent(content);
-          setHasUnsavedChanges(true);
-        }}
-      />
-
-      {/* Your existing modals */}
-      {/* ... (keep all your existing modals) */}
     </View>
+  </View>
+</Modal>
+        {/* Enhanced Image Insertion Modal */}
+        <Modal visible={showImageModal} animationType="slide" transparent>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Insert Image</Text>
+              
+              {/* Tab Navigation */}
+              <View style={styles.tabContainer}>
+                <TouchableOpacity 
+                  style={[styles.tab, activeTab === 'url' && styles.activeTab]}
+                  onPress={() => setActiveTab('url')}
+                >
+                  <Text style={[styles.tabText, activeTab === 'url' && styles.activeTabText]}>
+                    URL
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.tab, activeTab === 'gallery' && styles.activeTab]}
+                  onPress={() => setActiveTab('gallery')}
+                >
+                  <Text style={[styles.tabText, activeTab === 'gallery' && styles.activeTabText]}>
+                    Gallery
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.tab, activeTab === 'camera' && styles.activeTab]}
+                  onPress={() => setActiveTab('camera')}
+                >
+                  <Text style={[styles.tabText, activeTab === 'camera' && styles.activeTabText]}>
+                    Camera
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {activeTab === 'url' ? (
+                <>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter image URL"
+                    value={imageUrl}
+                    onChangeText={setImageUrl}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                  />
+                  
+                  <Text style={styles.helpText}>
+                    Enter the full URL of an image (e.g., https://example.com/image.jpg)
+                  </Text>
+                </>
+              ) : activeTab === 'gallery' ? (
+                <TouchableOpacity style={styles.imageOption} onPress={pickImageFromGallery}>
+                  <Ionicons name="images" size={32} color="#007AFF" />
+                  <Text style={styles.imageOptionText}>Choose from Gallery</Text>
+                  <Text style={styles.imageOptionSubtext}>Select an image from your photo library</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={styles.imageOption} onPress={takePhoto}>
+                  <Ionicons name="camera" size={32} color="#007AFF" />
+                  <Text style={styles.imageOptionText}>Take Photo</Text>
+                  <Text style={styles.imageOptionSubtext}>Use your camera to take a new photo</Text>
+                </TouchableOpacity>
+              )}
+              
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => setShowImageModal(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                
+                {activeTab === 'url' && (
+                  <TouchableOpacity 
+                    style={[styles.modalButton, styles.confirmButton]}
+                    onPress={confirmImage}
+                  >
+                    <Text style={styles.confirmButtonText}>Insert</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Export Modal */}
+        <Modal visible={showExportModal} animationType="slide" transparent>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Export Document</Text>
+              
+              <Text style={styles.exportStats}>
+                📊 Stats: {wordCount} words, {charCount} characters
+              </Text>
+              
+              <TouchableOpacity style={styles.exportOption} onPress={handleExportHTML}>
+                <Ionicons name="document-text" size={24} color="#007AFF" />
+                <View style={styles.exportOptionInfo}>
+                  <Text style={styles.exportOptionTitle}>Export as HTML</Text>
+                  <Text style={styles.exportOptionDesc}>Rich formatted content with HTML tags</Text>
+                </View>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.exportOption} onPress={handleExportText}>
+                <Ionicons name="document" size={24} color="#007AFF" />
+                <View style={styles.exportOptionInfo}>
+                  <Text style={styles.exportOptionTitle}>Export as Plain Text</Text>
+                  <Text style={styles.exportOptionDesc}>Clean text without formatting</Text>
+                </View>
+              </TouchableOpacity>
+              
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => setShowExportModal(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Save/Title Modal */}
+        <Modal visible={showSaveModal} animationType="slide" transparent>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Save Document</Text>
+              
+              <TextInput
+                style={styles.input}
+                placeholder="Document title"
+                value={title}
+                onChangeText={setTitle}
+                autoFocus
+              />
+              
+              <View style={styles.modalButtons}>
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => setShowSaveModal(false)}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={[styles.modalButton, styles.confirmButton]}
+                  onPress={handleSave}
+                >
+                  <Text style={styles.confirmButtonText}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      </View>
+//    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'colors.background',
+  },
   container: {
     flex: 1,
+    backgroundColor: '#colors.background',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    justifyContent: 'space-between',
+    padding: 5,
     borderBottomWidth: 1,
-    height: 44,
+    borderBottomColor: '#e0e0e0',
+    backgroundColor: 'colors.background',
   },
   menuButton: {
-    padding: 4,
+    padding: 8,
   },
   titleSection: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: 16,
   },
   title: {
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    marginRight: 4,
+    marginRight: 8,
+    color: '#333',
   },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   stats: {
-    marginRight: 8,
+    marginRight: 12,
     alignItems: 'flex-end',
   },
   statText: {
-    fontSize: 10,
+    fontSize: 11,
+    color: '#666',
   },
   actionButton: {
-    padding: 4,
-    marginRight: 8,
+    padding: 8,
+    marginRight: 12,
   },
   saveButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
   },
   saveButtonText: {
     color: 'white',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
   },
   editorContainer: {
@@ -508,4 +700,203 @@ const styles = StyleSheet.create({
   editor: {
     flex: 1,
   },
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    padding: 24,
+    borderRadius: 12,
+    width: '90%',
+    maxWidth: 400,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  // New Tab Styles
+  tabContainer: {
+    flexDirection: 'row',
+    marginBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  activeTab: {
+    borderBottomColor: '#007AFF',
+  },
+  tabText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  activeTabText: {
+    color: '#007AFF',
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    padding: 12,
+    marginVertical: 8,
+    borderRadius: 8,
+    fontSize: 16,
+  },
+  // File Pick Button
+  filePickButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    borderWidth: 2,
+    borderColor: '#007AFF',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    marginVertical: 8,
+    backgroundColor: '#f8f9ff',
+  },
+  filePickText: {
+    marginLeft: 12,
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '500',
+  },
+  // Image Options
+  imageOption: {
+    alignItems: 'center',
+    padding: 24,
+    borderWidth: 2,
+    borderColor: '#007AFF',
+    borderStyle: 'dashed',
+    borderRadius: 12,
+    marginVertical: 8,
+    backgroundColor: '#f8f9ff',
+  },
+  imageOptionText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  imageOptionSubtext: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+  },
+  helpText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  exportStats: {
+    textAlign: 'center',
+    marginBottom: 20,
+    color: '#666',
+    fontSize: 14,
+  },
+  exportOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  exportOptionInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  exportOptionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  exportOptionDesc: {
+    fontSize: 12,
+    color: '#666',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 16,
+  },
+  modalButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: '#6c757d',
+  },
+  confirmButton: {
+    backgroundColor: '#007AFF',
+  },
+  cancelButtonText: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  confirmButtonText: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  fileSection: {
+    width: '100%',
+  },
+  filePickButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#007AFF',
+    borderStyle: 'dashed',
+    borderRadius: 8,
+    backgroundColor: '#F8FAFF',
+    marginBottom: 12,
+  },
+  filePickText: {
+    marginLeft: 8,
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+  selectedFile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    backgroundColor: '#f5f5f5',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  selectedFileName: {
+    flex: 1,
+    marginLeft: 8,
+    color: '#333',
+    fontSize: 14,
+  },
+  selectedFileSize: {
+    color: '#666',
+    fontSize: 12,
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
 });
+

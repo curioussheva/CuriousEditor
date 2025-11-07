@@ -1,64 +1,96 @@
 import React from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  TouchableOpacity, 
-  ScrollView 
-} from 'react-native';
-import { DrawerContentComponentProps } from '@react-navigation/drawer';
-import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { View, Text, TouchableOpacity, Image, StyleSheet, Linking } from 'react-native';
+import { DrawerContentScrollView } from '@react-navigation/drawer';
+import { useRouter, usePathname } from 'expo-router';
 import { useTheme } from '../contexts/ThemeContext';
 
-export default function CustomDrawerContent(props: DrawerContentComponentProps) {
+export default function CustomDrawerContent() {
+  const { colors, isDark } = useTheme();
   const router = useRouter();
-  const { colors } = useTheme();
+  const pathname = usePathname();
 
-  const menuItems = [
-    {
-      title: 'Editor',
-      icon: 'document-text',
-      route: '/(drawer)/editor',
-    },
-    {
-      title: 'Project Explorer',
-      icon: 'folder',
-      route: '/(drawer)/projects',
-    },
-    {
-      title: 'Settings',
-      icon: 'settings',
-      route: '/(drawer)/settings',
-    },
+  const menus = [
+    { label: 'Editor', route: '/(drawer)/editor', icon: '📝' },
+    { label: 'Projects', route: '/(drawer)/projects', icon: '📁' },
+    { label: 'Settings', route: '/(drawer)/settings', icon: '⚙️' },
   ];
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.surface }]}>
-      {/* Header */}
-      <View style={[styles.header, { backgroundColor: colors.primary }]}>
-        <Text style={styles.headerTitle}>Curious Editor</Text>
-        <Text style={styles.headerSubtitle}>Rich Text Editor</Text>
-      </View>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
+      <DrawerContentScrollView
+        contentContainerStyle={{ flexGrow: 1, paddingVertical: 20 }}
+      >
+        {/* HEADER */}
+        <View style={styles.header}>
+          <Image
+            source={require('../assets/images/icon.png')}
+            style={styles.logo}
+            resizeMode="contain"
+          />
+          <Text style={[styles.appName, { color: colors.text }]}>
+            CuriousEditor
+          </Text>
+        </View>
 
-      {/* Menu Items */}
-      <ScrollView style={styles.menuContainer}>
-        {menuItems.map((item, index) => (
-          <TouchableOpacity
-            key={index}
-            style={[styles.menuItem, { borderBottomColor: colors.border }]}
-            onPress={() => router.push(item.route as any)}
-          >
-            <Ionicons name={item.icon as any} size={24} color={colors.text} />
-            <Text style={[styles.menuText, { color: colors.text }]}>{item.title}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+        {/* MENU */}
+        <View style={styles.menuContainer}>
+          {menus.map((item) => {
+            const active = pathname === item.route;
+            return (
+              <TouchableOpacity
+                key={item.route}
+                style={[
+                  styles.menuItem,
+                  active && {
+                    backgroundColor: isDark
+                      ? colors.surface
+                      : `${colors.primary}22`,
+                    borderLeftWidth: 4,
+                    borderLeftColor: colors.primary,
+                  },
+                ]}
+                onPress={() => router.push(item.route)}
+              >
+                <Text
+                  style={[
+                    styles.menuIcon,
+                    { color: active ? colors.primary : colors.text },
+                  ]}
+                >
+                  {item.icon}
+                </Text>
+                <Text
+                  style={[
+                    styles.menuLabel,
+                    { color: active ? colors.primary : colors.text },
+                  ]}
+                >
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </DrawerContentScrollView>
 
-      {/* Footer */}
-      <View style={[styles.footer, { borderTopColor: colors.border }]}>
-        <Text style={[styles.footerText, { color: colors.textSecondary }]}>
-          Curious Editor v1.0.0
+      {/* FOOTER */}
+      <View
+        style={[
+          styles.footer,
+          { borderTopColor: colors.border },
+        ]}
+      >
+        <TouchableOpacity
+          onPress={() =>
+            Linking.openURL('https://curioussheva.dev/about')
+          }
+        >
+          <Text style={[styles.footerText, { color: colors.textSecondary }]}>
+            About CuriousSheva
+          </Text>
+        </TouchableOpacity>
+        <Text style={[styles.footerVersion, { color: colors.textSecondary }]}>
+          v1.0.0
         </Text>
       </View>
     </View>
@@ -70,39 +102,46 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    padding: 20,
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  headerTitle: {
-    fontSize: 20,
+  logo: {
+    width: 70,
+    height: 70,
+    marginBottom: 8,
+  },
+  appName: {
+    fontSize: 18,
     fontWeight: 'bold',
-    color: 'white',
-    marginBottom: 4,
-  },
-  headerSubtitle: {
-    fontSize: 14,
-    color: 'rgba(255,255,255,0.8)',
   },
   menuContainer: {
-    flex: 1,
-    paddingVertical: 10,
+    paddingHorizontal: 10,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-    borderBottomWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    marginVertical: 2,
   },
-  menuText: {
+  menuIcon: {
+    fontSize: 18,
+    marginRight: 12,
+  },
+  menuLabel: {
     fontSize: 16,
-    marginLeft: 15,
   },
   footer: {
-    padding: 20,
     borderTopWidth: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
   },
   footerText: {
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  footerVersion: {
     fontSize: 12,
-    textAlign: 'center',
   },
 });

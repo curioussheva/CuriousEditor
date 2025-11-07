@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-export type ThemeType = 'light' | 'dark' | 'auto';
+export type ThemeType = 'light' | 'dark' | 'auto' | 'ocean' | 'forest' | 'solarized';
 
 interface ThemeColors {
   background: string;
@@ -21,6 +21,10 @@ interface ThemeContextType {
   setTheme: (theme: ThemeType) => void;
   isDark: boolean;
 }
+
+// ======================
+// 🎨 THEME DEFINITIONS
+// ======================
 
 const lightColors: ThemeColors = {
   background: '#ffffff',
@@ -43,6 +47,54 @@ const darkColors: ThemeColors = {
   error: '#FF453A',
   success: '#30D158',
 };
+
+// 🟦 Ocean theme
+const oceanColors: ThemeColors = {
+  background: '#0b132b',
+  surface: '#1c2541',
+  primary: '#5bc0be',
+  text: '#ffffff',
+  textSecondary: '#c0d6df',
+  border: '#3a506b',
+  error: '#ff6b6b',
+  success: '#4ecdc4',
+};
+
+// 🌲 Forest theme
+const forestColors: ThemeColors = {
+  background: '#0e1e13',
+  surface: '#18392b',
+  primary: '#4caf50',
+  text: '#f1f8e9',
+  textSecondary: '#a5d6a7',
+  border: '#2e7d32',
+  error: '#ef5350',
+  success: '#66bb6a',
+};
+
+// 🌅 Solarized theme
+const solarizedColors: ThemeColors = {
+  background: '#fdf6e3',
+  surface: '#eee8d5',
+  primary: '#268bd2',
+  text: '#657b83',
+  textSecondary: '#93a1a1',
+  border: '#ccc2a6',
+  error: '#dc322f',
+  success: '#859900',
+};
+
+const allThemes: Record<Exclude<ThemeType, 'auto'>, ThemeColors> = {
+  light: lightColors,
+  dark: darkColors,
+  ocean: oceanColors,
+  forest: forestColors,
+  solarized: solarizedColors,
+};
+
+// ======================
+// 🧩 CONTEXT PROVIDER
+// ======================
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
@@ -74,15 +126,16 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
-  const getActualTheme = (): 'light' | 'dark' => {
+  const getActualTheme = (): keyof typeof allThemes => {
     if (theme === 'auto') {
       return systemColorScheme === 'dark' ? 'dark' : 'light';
     }
-    return theme;
+    return theme === 'auto' ? 'light' : theme;
   };
 
-  const isDark = getActualTheme() === 'dark';
-  const colors = isDark ? darkColors : lightColors;
+  const activeTheme = getActualTheme();
+  const colors = allThemes[activeTheme];
+  const isDark = ['dark', 'ocean', 'forest'].includes(activeTheme);
 
   return (
     <ThemeContext.Provider value={{ theme, colors, setTheme, isDark }}>
@@ -90,6 +143,10 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     </ThemeContext.Provider>
   );
 };
+
+// ======================
+// 🔌 HOOK
+// ======================
 
 export const useTheme = () => {
   const context = useContext(ThemeContext);

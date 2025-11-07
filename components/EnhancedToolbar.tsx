@@ -18,8 +18,6 @@ interface EnhancedToolbarProps {
   onNewDocument: () => void;
   onInsertTable?: () => void;
   onInsertCode?: () => void;
-  onOpenTerminal?: () => void;
-  onOpenAXS?: () => void;
 }
 
 const EnhancedToolbar: React.FC<EnhancedToolbarProps> = ({ 
@@ -28,9 +26,7 @@ const EnhancedToolbar: React.FC<EnhancedToolbarProps> = ({
   onInsertImage,
   onNewDocument,
   onInsertTable,
-  onInsertCode,
-  onOpenTerminal,
-  onOpenAXS
+  onInsertCode
 }) => {
   const { colors } = useTheme();
   const [showCodeModal, setShowCodeModal] = useState(false);
@@ -146,16 +142,16 @@ const EnhancedToolbar: React.FC<EnhancedToolbarProps> = ({
           onPress={() => handleFormat('insertOrderedList')}
           title="Numbered"
         />
-
+        
         <View style={[styles.separator, { backgroundColor: colors.border }]} />
-
-        {/* Alignment */}
-        <ToolbarButton icon="⫷" onPress={() => handleFormat('justifyLeft')} />
-        <ToolbarButton icon="☰" onPress={() => handleFormat('justifyCenter')} />
-        <ToolbarButton icon="⫸" onPress={() => handleFormat('justifyRight')} />
-
+        
+      {/* Alignment */}
+      <ToolbarButton icon="⫷" onPress={() => handleFormat('justifyLeft')} />
+      <ToolbarButton icon="☰" onPress={() => handleFormat('justifyCenter')} />
+       <ToolbarButton icon="⫸" onPress={() => handleFormat('justifyRight')} />
+       
         <View style={[styles.separator, { backgroundColor: colors.border }]} />
-
+        
         {/* Indentation */}
         <IconToolbarButton 
           iconName="arrow-forward" 
@@ -167,9 +163,9 @@ const EnhancedToolbar: React.FC<EnhancedToolbarProps> = ({
           onPress={() => handleFormat('outdent')}
           title="Outdent"
         />
-
+        
         <View style={[styles.separator, { backgroundColor: colors.border }]} />
-
+        
         {/* Media */}
         <IconToolbarButton 
           iconName="link" 
@@ -186,32 +182,19 @@ const EnhancedToolbar: React.FC<EnhancedToolbarProps> = ({
           onPress={() => onInsertTable ? onInsertTable() : editorRef.current?.insertTable()}
           title="Table"
         />
-
+        
         <View style={[styles.separator, { backgroundColor: colors.border }]} />
-
+        
         {/* Code & Special Formats */}
         <IconToolbarButton 
           iconName="code" 
           onPress={() => setShowCodeModal(true)}
           title="Code"
         />
-        <ToolbarButton icon="❝" onPress={() => handleFormat('formatBlock', '<blockquote>')} title="Quote" />
-
-        <View style={[styles.separator, { backgroundColor: colors.border }]} />
-
-        {/* Terminal Features */}
-        <IconToolbarButton 
-          iconName="terminal" 
-          onPress={onOpenTerminal}
-          title="Terminal"
-        />
-        <IconToolbarButton 
-          iconName="code-slash" 
-          onPress={onOpenAXS}
-          title="AXS"
-        />
+      <ToolbarButton icon="❝" onPress={() => handleFormat('formatBlock', '<blockquote>')} />
+      <ToolbarButton icon="</>" onPress={() => handleFormat('formatBlock', '<pre>')} />
       </ScrollView>
-      
+
       {/* Code Language Selection Modal */}
       <Modal visible={showCodeModal} animationType="slide" transparent>
         <View style={styles.modalContainer}>

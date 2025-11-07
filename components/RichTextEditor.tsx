@@ -1,8 +1,8 @@
-import React, { useRef, useState, forwardRef, useImperativeHandle } from 'react';
+import React, { useRef, useState, forwardRef, useImperativeHandle, useEffect } from 'react';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { StyleSheet, View, TouchableOpacity, Text, ScrollView, TextInput } from 'react-native';
 import MarkdownDisplay from 'react-native-markdown-display';
-
+import AsyncStorage from '@react-native-async-storage/async-storage';
 export interface EditorRef {
   setContent: (html: string) => void;
   getContent: () => Promise<string>;
@@ -31,7 +31,10 @@ interface RichTextEditorProps {
 
 // Helper function to convert HTML to Markdown
 const convertHTMLToMarkdown = (html: string): string => {
-  return html
+  // Hapus placeholder sebelum konversi
+  const cleanHtml = html.replace(/<div class="placeholder">.*?<\/div>/, '');
+  
+  return cleanHtml
     .replace(/<h1[^>]*>(.*?)<\/h1>/g, '# $1\n')
     .replace(/<h2[^>]*>(.*?)<\/h2>/g, '## $1\n')
     .replace(/<h3[^>]*>(.*?)<\/h3>/g, '### $1\n')
@@ -49,11 +52,14 @@ const convertHTMLToMarkdown = (html: string): string => {
     .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>');
+    .replace(/&gt;/g, '>')
+    .trim();
 };
 
 // Helper function to convert Markdown to HTML
 const convertMarkdownToHTML = (markdown: string): string => {
+  if (!markdown.trim()) return '';
+  
   return markdown
     .replace(/^# (.*$)/gim, '<h1>$1</h1>')
     .replace(/^## (.*$)/gim, '<h2>$1</h2>')
@@ -71,16 +77,29 @@ const convertMarkdownToHTML = (markdown: string): string => {
 const RichTextEditor = forwardRef<EditorRef, RichTextEditorProps>((props, ref) => {
   const webViewRef = useRef<WebView>(null);
   const [editorReady, setEditorReady] = useState(false);
-  const [content, setContent] = useState('');
+  const [content, setContent] = useState(props.initialContent || '');
   const [viewMode, setViewMode] = useState<'wysiwyg' | 'html' | 'markdown' | 'preview'>(props.viewMode || 'wysiwyg');
-  const [htmlContent, setHtmlContent] = useState('');
-  const [markdownContent, setMarkdownContent] = useState('');
+  const [htmlContent, setHtmlContent] = useState(props.initialContent || '');
+  const [markdownContent, setMarkdownContent] = useState(convertHTMLToMarkdown(props.initialContent || ''));
+  const [lastWysiwygContent, setLastWysiwygContent] = useState(props.initialContent || '');
 
   // Apply settings
   const settings = props.settings || {};
 
   // Get placeholder text from props with fallback
   const placeholderText = props.placeholder || "Start typing...";
+
+  // Sync content when view mode changes
+  useEffect(() => {
+    if (viewMode === 'wysiwyg' && editorReady && lastWysiwygContent) {
+      // Inject content ke WebView ketika kembali ke WYSIWYG mode
+      const escapedHtml = lastWysiwygContent.replace(/`/g, '\\`').replace(/\$/g, '\\$');
+      webViewRef.current?.injectJavaScript(`
+        window.editorFunctions.setContent(\`${escapedHtml}\`);
+        true;
+      `);
+    }
+  }, [viewMode, editorReady]);
 
   // Create the editor HTML with proper placeholder
   const editorHTML = `
@@ -186,206 +205,364 @@ const RichTextEditor = forwardRef<EditorRef, RichTextEditorProps>((props, ref) =
 <body>
     <div id="editor" contenteditable="true"></div>
 
-    <script>
-        let isContentSet = false;
+<script>
+  let isContentSet = false;
 
-        const editorFunctions = {
-            init: function() {
-                this.setPlaceholder('${placeholderText.replace(/'/g, "\\'")}');
-                window.ReactNativeWebView.postMessage(JSON.stringify({
-                    type: 'editorReady'
-                }));
-            },
+  const editorFunctions = {
+    init: function() {
+      this.setPlaceholder('${placeholderText.replace(/'/g, "\\'")}');
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'editorReady'
+      }));
+    },
 
-            updateContent: function() {
-                const content = document.getElementById('editor').innerHTML;
-                const text = document.getElementById('editor').innerText;
-                window.ReactNativeWebView.postMessage(JSON.stringify({
-                    type: 'contentChange',
-                    content: content,
-                    text: text
-                }));
-            },
+    updateContent: function() {
+      const content = document.getElementById('editor').innerHTML;
+      const text = document.getElementById('editor').innerText;
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'contentChange',
+        content: content,
+        text: text
+      }));
+    },
 
-            formatText: function(command, value = null) {
-                document.execCommand(command, false, value);
-                this.updateContent();
-                document.getElementById('editor').focus();
-            },
-
-            insertHTML: function(html) {
-                document.execCommand('insertHTML', false, html);
-                this.updateContent();
-            },
-
-            setContent: function(html) {
-                const editor = document.getElementById('editor');
-                editor.innerHTML = html;
-                isContentSet = true;
-                this.updateContent();
-            },
-
-            getContent: function() {
-                return document.getElementById('editor').innerHTML;
-            },
-
-            getText: function() {
-                return document.getElementById('editor').innerText;
-            },
-
-            clearContent: function() {
-                const editor = document.getElementById('editor');
-                editor.innerHTML = '';
-                isContentSet = false;
-                this.setPlaceholder('${placeholderText.replace(/'/g, "\\'")}');
-                this.updateContent();
-            },
-
-            setPlaceholder: function(text) {
-                const editor = document.getElementById('editor');
-                if (!editor.innerHTML.trim() && !isContentSet) {
-                    editor.innerHTML = '<div class="placeholder">' + text + '</div>';
-                }
-            },
-
-            insertImage: function(url, alt = 'Image') {
-                const html = '<img src="' + url + '" alt="' + alt + '" style="max-width:100%; height:auto; border-radius:6px; margin:8px 0;" />';
-                this.insertHTML(html);
-            },
-
-            createLink: function(url, text = null) {
-                if (text) {
-                    const html = '<a href="' + url + '" target="_blank">' + text + '</a>';
-                    this.insertHTML(html);
-                } else {
-                    document.execCommand('createLink', false, url);
-                    this.updateContent();
-                }
-            },
-
-            insertTable: function(rows = 3, cols = 3) {
-                let tableHTML = '<table style="width: 100%; border-collapse: collapse; margin: 12px 0;">';
-                for (let i = 0; i < rows; i++) {
-                    tableHTML += '<tr>';
-                    for (let j = 0; j < cols; j++) {
-                        tableHTML += '<td style="border: 1px solid #e0e0e0; padding: 8px;">Content</td>';
-                    }
-                    tableHTML += '</tr>';
-                }
-                tableHTML += '</table>';
-                this.insertHTML(tableHTML);
-            },
-
-            insertCode: function(language = 'javascript') {
-                const codeHTML = '<pre class="code-block"><code class="language-' + language + '">// Your ' + language + ' code here\\nfunction example() {\\n  return "Hello World";\\n}</code></pre>';
-                this.insertHTML(codeHTML);
-            }
-        };
-
-        // Event listeners
-        const editor = document.getElementById('editor');
+    formatText: function(command, value = null) {
+      console.log('Formatting:', command, value);
+      try {
+        // Handle special cases for block formatting
+        if (command === 'formatBlock' && value) {
+          document.execCommand('formatBlock', false, value);
+        } 
+        // Handle undo/redo
+        else if (command === 'undo' || command === 'redo') {
+          document.execCommand(command, false, null);
+        }
+        // Handle other commands with values
+        else if (value !== null && value !== 'null') {
+          document.execCommand(command, false, value);
+        }
+        // Handle commands without values
+        else {
+          document.execCommand(command, false, null);
+        }
         
-        editor.addEventListener('input', () => editorFunctions.updateContent());
-        editor.addEventListener('blur', () => editorFunctions.updateContent());
-        editor.addEventListener('focus', function() {
-            if (this.innerHTML.includes('placeholder')) {
-                this.innerHTML = '';
-                isContentSet = true;
-            }
-        });
+        this.updateContent();
+        document.getElementById('editor').focus();
+        
+        console.log('Format successful:', command);
+      } catch (error) {
+        console.error('Format failed:', error);
+        // Fallback for common issues
+        if (command === 'strikeThrough') {
+          document.execCommand('strikethrough', false, null);
+          this.updateContent();
+        }
+      }
+    },
 
-        // Initialize editor
-        editorFunctions.init();
+    insertHTML: function(html) {
+      try {
+        document.execCommand('insertHTML', false, html);
+        this.updateContent();
+        document.getElementById('editor').focus();
+      } catch (error) {
+        console.error('Insert HTML error:', error);
+        // Fallback: langsung set HTML di cursor position
+        const selection = window.getSelection();
+        if (selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0);
+          range.deleteContents();
+          const div = document.createElement('div');
+          div.innerHTML = html;
+          const fragment = document.createDocumentFragment();
+          while (div.firstChild) {
+            fragment.appendChild(div.firstChild);
+          }
+          range.insertNode(fragment);
+        }
+        this.updateContent();
+      }
+    },
 
-        // Expose to window
-        window.editorFunctions = editorFunctions;
-    </script>
+    setContent: function(html) {
+      const editor = document.getElementById('editor');
+      if (html && html.trim() !== '') {
+        editor.innerHTML = html;
+        isContentSet = true;
+      } else {
+        this.setPlaceholder('${placeholderText.replace(/'/g, "\\'")}');
+      }
+      this.updateContent();
+    },
+
+    getContent: function() {
+      return document.getElementById('editor').innerHTML;
+    },
+
+    getText: function() {
+      return document.getElementById('editor').innerText;
+    },
+
+    clearContent: function() {
+      const editor = document.getElementById('editor');
+      editor.innerHTML = '';
+      isContentSet = false;
+      this.setPlaceholder('${placeholderText.replace(/'/g, "\\'")}');
+      this.updateContent();
+    },
+
+    setPlaceholder: function(text) {
+      const editor = document.getElementById('editor');
+      if (!editor.innerHTML.trim() && !isContentSet) {
+        editor.innerHTML = '<div class="placeholder">' + text + '</div>';
+      }
+    },
+
+    insertImage: function(url, alt = 'Image') {
+      console.log('Inserting image:', url, alt);
+      try {
+        // Validate URL
+        if (!url || url.trim() === '') {
+          console.error('Invalid image URL');
+          return;
+        }
+        
+        // Create image HTML
+        const imgHTML = '<img src="' + url + '" alt="' + alt + '" style="max-width:100%; height:auto; border-radius:6px; margin:8px 0;" />';
+        console.log('Image HTML:', imgHTML);
+        this.insertHTML(imgHTML);
+        console.log('Image inserted successfully');
+      } catch (error) {
+        console.error('Insert image failed:', error);
+      }
+    },
+
+    createLink: function(url, text = null) {
+      console.log('Creating link:', url, text);
+      try {
+        // Validate URL
+        if (!url || url.trim() === '') {
+          console.error('Invalid URL');
+          return;
+        }
+        
+        if (text && text !== 'null') {
+          // Create link with custom text
+          const linkHTML = '<a href="' + url + '" target="_blank" style="color: #007AFF; text-decoration: none;">' + text + '</a>';
+          console.log('Link HTML:', linkHTML);
+          this.insertHTML(linkHTML);
+        } else {
+          // Use current selection for link text
+          document.execCommand('createLink', false, url);
+          this.updateContent();
+        }
+        console.log('Link created successfully');
+      } catch (error) {
+        console.error('Create link failed:', error);
+      }
+    },
+
+    insertTable: function(rows = 3, cols = 3) {
+      console.log('Inserting table:', rows, 'x', cols);
+      try {
+        let tableHTML = '<table style="width: 100%; border-collapse: collapse; margin: 12px 0; border: 1px solid #e0e0e0;">';
+        for (let i = 0; i < rows; i++) {
+          tableHTML += '<tr>';
+          for (let j = 0; j < cols; j++) {
+            tableHTML += '<td style="border: 1px solid #e0e0e0; padding: 8px;">&nbsp;</td>';
+          }
+          tableHTML += '</tr>';
+        }
+        tableHTML += '</table>';
+        this.insertHTML(tableHTML);
+        console.log('Table inserted successfully');
+      } catch (error) {
+        console.error('Insert table failed:', error);
+      }
+    },
+
+    insertCode: function(language = 'javascript') {
+      console.log('Inserting code block:', language);
+      try {
+        const codeHTML = '<pre class="code-block"><code class="language-' + language + '">// Your ' + language + ' code here\\nfunction example() {\\n  return "Hello World";\\n}</code></pre>';
+        this.insertHTML(codeHTML);
+        console.log('Code block inserted successfully');
+      } catch (error) {
+        console.error('Insert code failed:', error);
+      }
+    }
+  };
+
+  // Event listeners
+  const editor = document.getElementById('editor');
+  
+  editor.addEventListener('input', () => editorFunctions.updateContent());
+  editor.addEventListener('blur', () => editorFunctions.updateContent());
+  editor.addEventListener('focus', function() {
+    if (this.innerHTML.includes('placeholder')) {
+      this.innerHTML = '';
+      isContentSet = true;
+    }
+  });
+
+  // Keyboard shortcuts for undo/redo
+  editor.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey) {
+      if (e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        editorFunctions.formatText('undo');
+      } else if ((e.key === 'z' && e.shiftKey) || e.key === 'y') {
+        e.preventDefault();
+        editorFunctions.formatText('redo');
+      }
+    }
+  });
+
+  // Initialize editor
+  editorFunctions.init();
+
+  // Expose to window
+  window.editorFunctions = editorFunctions;
+  
+  // Debug: log ketika functions sudah tersedia
+  console.log('Editor functions loaded successfully');
+</script>
 </body>
 </html>
   `;
 
   useImperativeHandle(ref, () => ({
-    setContent: (html: string) => {
-      setContent(html);
-      setHtmlContent(html);
-      setMarkdownContent(convertHTMLToMarkdown(html));
+  setContent: (html: string) => {
+    setContent(html);
+    setHtmlContent(html);
+    setMarkdownContent(convertHTMLToMarkdown(html));
+    setLastWysiwygContent(html);
+    
+    if (editorReady) {
       const escapedHtml = html.replace(/`/g, '\\`').replace(/\$/g, '\\$');
       webViewRef.current?.injectJavaScript(`
         window.editorFunctions.setContent(\`${escapedHtml}\`);
         true;
       `);
-    },
-    getContent: (): Promise<string> => {
-      return new Promise((resolve) => {
-        if (viewMode === 'html') {
-          resolve(htmlContent);
-        } else if (viewMode === 'markdown') {
-          resolve(convertMarkdownToHTML(markdownContent));
-        } else {
-          webViewRef.current?.injectJavaScript(`
-            const content = window.editorFunctions.getContent();
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-              type: 'getContentResponse',
-              content: content
-            }));
-            true;
-          `);
-        }
-      });
-    },
-    getText: (): Promise<string> => {
-      return new Promise((resolve) => {
+    }
+  },
+  getContent: (): Promise<string> => {
+    return new Promise((resolve) => {
+      if (viewMode === 'html') {
+        resolve(htmlContent);
+      } else if (viewMode === 'markdown') {
+        resolve(convertMarkdownToHTML(markdownContent));
+      } else {
         webViewRef.current?.injectJavaScript(`
-          const text = window.editorFunctions.getText();
+          const content = window.editorFunctions.getContent();
           window.ReactNativeWebView.postMessage(JSON.stringify({
-            type: 'getTextResponse', 
-            text: text
+            type: 'getContentResponse',
+            content: content
           }));
           true;
         `);
-      });
-    },
-    clearContent: () => {
-      setContent('');
-      setHtmlContent('');
-      setMarkdownContent('');
+      }
+    });
+  },
+  getText: (): Promise<string> => {
+    return new Promise((resolve) => {
       webViewRef.current?.injectJavaScript(`
-        window.editorFunctions.clearContent();
+        const text = window.editorFunctions.getText();
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'getTextResponse', 
+          text: text
+        }));
         true;
       `);
-    },
-    formatText: (command: string, value: string | null = null) => {
-      webViewRef.current?.injectJavaScript(`
-        window.editorFunctions.formatText('${command}', ${value ? `'${value}'` : 'null'});
-        true;
-      `);
-    },
-    insertImage: (url: string, alt: string = 'Image') => {
-      webViewRef.current?.injectJavaScript(`
-        window.editorFunctions.insertImage('${url}', '${alt}');
-        true;
-      `);
-    },
-    createLink: (url: string, text: string | null = null) => {
-      webViewRef.current?.injectJavaScript(`
-        window.editorFunctions.createLink('${url}', ${text ? `'${text}'` : 'null'});
-        true;
-      `);
-    },
-    insertTable: (rows: number = 3, cols: number = 3) => {
-      webViewRef.current?.injectJavaScript(`
-        window.editorFunctions.insertTable(${rows}, ${cols});
-        true;
-      `);
-    },
-    insertCode: (language: string = 'javascript') => {
-      webViewRef.current?.injectJavaScript(`
-        window.editorFunctions.insertCode('${language}');
-        true;
-      `);
-    }
-  }));
-
+    });
+  },
+  clearContent: () => {
+    setContent('');
+    setHtmlContent('');
+    setMarkdownContent('');
+    setLastWysiwygContent('');
+    webViewRef.current?.injectJavaScript(`
+      window.editorFunctions.clearContent();
+      true;
+    `);
+  },
+  formatText: (command: string, value: string | null = null) => {
+    // Escape values untuk mencegah JavaScript error
+    const escapedCommand = command.replace(/'/g, "\\'");
+    const escapedValue = value ? value.replace(/'/g, "\\'") : null;
+    
+    const jsCode = `
+      (function() {
+        try {
+          window.editorFunctions.formatText('${escapedCommand}', ${escapedValue ? `'${escapedValue}'` : 'null'});
+          return true;
+        } catch (error) {
+          console.error('Format error:', error);
+          return false;
+        }
+      })();
+      true;
+    `;
+    
+    console.log('Executing formatText:', command, value);
+    webViewRef.current?.injectJavaScript(jsCode);
+  },
+  insertImage: (url: string, alt: string = 'Image') => {
+    // Escape URL dan alt text
+    const escapedUrl = url.replace(/'/g, "\\'").replace(/\n/g, "\\n");
+    const escapedAlt = alt.replace(/'/g, "\\'").replace(/\n/g, "\\n");
+    
+    const jsCode = `
+      (function() {
+        try {
+          window.editorFunctions.insertImage('${escapedUrl}', '${escapedAlt}');
+          return true;
+        } catch (error) {
+          console.error('Insert image error:', error);
+          return false;
+        }
+      })();
+      true;
+    `;
+    
+    console.log('Executing insertImage:', url);
+    webViewRef.current?.injectJavaScript(jsCode);
+  },
+  createLink: (url: string, text: string | null = null) => {
+    // Escape URL dan text
+    const escapedUrl = url.replace(/'/g, "\\'").replace(/\n/g, "\\n");
+    const escapedText = text ? text.replace(/'/g, "\\'").replace(/\n/g, "\\n") : null;
+    
+    const jsCode = `
+      (function() {
+        try {
+          window.editorFunctions.createLink('${escapedUrl}', ${escapedText ? `'${escapedText}'` : 'null'});
+          return true;
+        } catch (error) {
+          console.error('Create link error:', error);
+          return false;
+        }
+      })();
+      true;
+    `;
+    
+    console.log('Executing createLink:', url, text);
+    webViewRef.current?.injectJavaScript(jsCode);
+  },
+  insertTable: (rows: number = 3, cols: number = 3) => {
+    webViewRef.current?.injectJavaScript(`
+      window.editorFunctions.insertTable(${rows}, ${cols});
+      true;
+    `);
+  },
+  insertCode: (language: string = 'javascript') => {
+    const escapedLanguage = language.replace(/'/g, "\\'");
+    webViewRef.current?.injectJavaScript(`
+      window.editorFunctions.insertCode('${escapedLanguage}');
+      true;
+    `);
+  }
+}));
   const handleWebViewMessage = (event: WebViewMessageEvent) => {
     try {
       const data = JSON.parse(event.nativeEvent.data);
@@ -394,18 +571,21 @@ const RichTextEditor = forwardRef<EditorRef, RichTextEditorProps>((props, ref) =
         case 'editorReady':
           setEditorReady(true);
           props.onEditorReady?.();
-          if (props.initialContent) {
+          if (content) {
+            const escapedHtml = content.replace(/`/g, '\\`').replace(/\$/g, '\\$');
             webViewRef.current?.injectJavaScript(`
-              window.editorFunctions.setContent(\`${props.initialContent}\`);
+              window.editorFunctions.setContent(\`${escapedHtml}\`);
               true;
             `);
           }
           break;
         case 'contentChange':
-          setContent(data.content);
-          setHtmlContent(data.content);
-          setMarkdownContent(convertHTMLToMarkdown(data.content));
-          props.onChange?.(data.content, data.text);
+          const cleanContent = data.content.replace(/<div class="placeholder">.*?<\/div>/, '');
+          setContent(cleanContent);
+          setHtmlContent(cleanContent);
+          setMarkdownContent(convertHTMLToMarkdown(cleanContent));
+          setLastWysiwygContent(cleanContent);
+          props.onChange?.(cleanContent, data.text);
           break;
         default:
           break;
@@ -413,6 +593,42 @@ const RichTextEditor = forwardRef<EditorRef, RichTextEditorProps>((props, ref) =
     } catch (error) {
       console.log('Error parsing message:', error);
     }
+  };
+
+  // Handle view mode change
+  const handleViewModeChange = (newViewMode: 'wysiwyg' | 'html' | 'markdown' | 'preview') => {
+    // Sync content sebelum ganti view mode
+    if (viewMode === 'wysiwyg' && newViewMode !== 'wysiwyg') {
+      // Simpan konten WYSIWYG terakhir
+      webViewRef.current?.injectJavaScript(`
+        const content = window.editorFunctions.getContent();
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'contentChange',
+          content: content,
+          text: window.editorFunctions.getText()
+        }));
+        true;
+      `);
+    } else if (viewMode === 'html' && newViewMode === 'wysiwyg') {
+      // Update WYSIWYG dengan konten HTML
+      const escapedHtml = htmlContent.replace(/`/g, '\\`').replace(/\$/g, '\\$');
+      webViewRef.current?.injectJavaScript(`
+        window.editorFunctions.setContent(\`${escapedHtml}\`);
+        true;
+      `);
+      setLastWysiwygContent(htmlContent);
+    } else if (viewMode === 'markdown' && newViewMode === 'wysiwyg') {
+      // Update WYSIWYG dengan konten Markdown yang dikonversi
+      const htmlFromMarkdown = convertMarkdownToHTML(markdownContent);
+      const escapedHtml = htmlFromMarkdown.replace(/`/g, '\\`').replace(/\$/g, '\\$');
+      webViewRef.current?.injectJavaScript(`
+        window.editorFunctions.setContent(\`${escapedHtml}\`);
+        true;
+      `);
+      setLastWysiwygContent(htmlFromMarkdown);
+    }
+    
+    setViewMode(newViewMode);
   };
 
   // Editable HTML View
@@ -489,7 +705,7 @@ const RichTextEditor = forwardRef<EditorRef, RichTextEditorProps>((props, ref) =
       <View style={styles.viewModeSelector}>
         <TouchableOpacity 
           style={[styles.viewModeButton, viewMode === 'wysiwyg' && styles.activeViewMode]}
-          onPress={() => setViewMode('wysiwyg')}
+          onPress={() => handleViewModeChange('wysiwyg')}
         >
           <Text style={[styles.viewModeText, viewMode === 'wysiwyg' && styles.activeViewModeText]}>
             WYSIWYG
@@ -497,7 +713,7 @@ const RichTextEditor = forwardRef<EditorRef, RichTextEditorProps>((props, ref) =
         </TouchableOpacity>
         <TouchableOpacity 
           style={[styles.viewModeButton, viewMode === 'html' && styles.activeViewMode]}
-          onPress={() => setViewMode('html')}
+          onPress={() => handleViewModeChange('html')}
         >
           <Text style={[styles.viewModeText, viewMode === 'html' && styles.activeViewModeText]}>
             HTML
@@ -505,7 +721,7 @@ const RichTextEditor = forwardRef<EditorRef, RichTextEditorProps>((props, ref) =
         </TouchableOpacity>
         <TouchableOpacity 
           style={[styles.viewModeButton, viewMode === 'markdown' && styles.activeViewMode]}
-          onPress={() => setViewMode('markdown')}
+          onPress={() => handleViewModeChange('markdown')}
         >
           <Text style={[styles.viewModeText, viewMode === 'markdown' && styles.activeViewModeText]}>
             Markdown
@@ -513,7 +729,7 @@ const RichTextEditor = forwardRef<EditorRef, RichTextEditorProps>((props, ref) =
         </TouchableOpacity>
         <TouchableOpacity 
           style={[styles.viewModeButton, viewMode === 'preview' && styles.activeViewMode]}
-          onPress={() => setViewMode('preview')}
+          onPress={() => handleViewModeChange('preview')}
         >
           <Text style={[styles.viewModeText, viewMode === 'preview' && styles.activeViewModeText]}>
             Preview
@@ -542,7 +758,6 @@ const RichTextEditor = forwardRef<EditorRef, RichTextEditorProps>((props, ref) =
 });
 
 // ... keep your existing styles and markdownStyles ...
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
