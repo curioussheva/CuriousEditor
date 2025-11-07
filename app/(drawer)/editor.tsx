@@ -634,7 +634,7 @@ const resetLinkModal = () => {
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  Area: {
     flex: 1,
     backgroundColor: 'colors.background',
   },
